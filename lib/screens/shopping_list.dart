@@ -16,34 +16,59 @@ class ShoppingListScreen extends StatefulWidget {
 
 class _ShoppingListScreenState extends State<ShoppingListScreen> {
   List<GroceryItem> _groceryItems = [];
+  var _isLoading = true;
+  String? _error;
   void _addItem() async {
-    await Navigator.of(context).push<GroceryItem>(
+    final newItem = await Navigator.of(context).push<GroceryItem>(
         MaterialPageRoute(builder: (ctx) => const NewItemScreen()));
-
-    _loadItems();
+    if (newItem != null) {
+      setState(() {
+        _groceryItems.add(newItem);
+      });
+    }
   }
 
   void _loadItems() async {
     final url = Uri.https(
         "fluttershoppinglist-8dd4e-default-rtdb.asia-southeast1.firebasedatabase.app",
         "shopping-list.json");
-    final response = await http.get(url);
-    final Map<String, dynamic> listData = jsonDecode(response.body);
-    final List<GroceryItem> loadingItems = [];
-    for (final item in listData.entries) {
-      final category = categories.entries.firstWhere((category) {
-        return category.value.title == item.value["category"];
-      }).value;
-      loadingItems.add(GroceryItem(
-          id: item.key,
-          name: item.value["name"],
-          quantity: item.value["quantity"],
-          category: category));
-    }
 
-    setState(() {
-      _groceryItems = loadingItems;
-    });
+    try {
+      final response = await http.get(url);
+      if (response.body != 'null') {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+      if (response.statusCode >= 400) {
+        setState(() {
+          _error = "Failed to fetch data. Please try again later.";
+        });
+      }
+      final Map<String, dynamic> listData = jsonDecode(response.body);
+      final List<GroceryItem> loadingItems = [];
+      for (final item in listData.entries) {
+        final category = categories.entries.firstWhere((category) {
+          return category.value.title == item.value["category"];
+        }).value;
+        loadingItems.add(GroceryItem(
+            id: item.key,
+            name: item.value["name"],
+            quantity: item.value["quantity"],
+            category: category));
+      }
+
+      setState(() {
+        _groceryItems = loadingItems;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = "Failed to fetch data. Please try again later.";
+      });
+      return;
+    }
   }
 
   @override
@@ -52,20 +77,27 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     _loadItems();
   }
 
-  void _deleteItem(GroceryItem item) {
+  void _deleteItem(GroceryItem item) async {
+    final index = _groceryItems.indexOf(item);
+    final url = Uri.https(
+        "fluttershoppinglist-8dd4e-default-rtdb.asia-southeast1.firebasedatabase.app",
+        "shopping-list/${item.id}.json");
     setState(() {
       _groceryItems.remove(item);
     });
+    final response = await http.delete(url);
+    if (response.statusCode >= 400) {
+      setState(() {
+        _groceryItems.insert(index, item);
+      });
+    }
+    if (!context.mounted) {
+      return;
+    }
     ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text("Item deleted"),
-        action: SnackBarAction(
-            label: "Undo",
-            onPressed: () {
-              setState(() {
-                _groceryItems.add(item);
-              });
-            })));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text("Item deleted"),
+    ));
   }
 
   @override
@@ -77,6 +109,16 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       body = GroceryList(
         onDelete: _deleteItem,
         groceries: _groceryItems,
+      );
+    }
+    if (_isLoading) {
+      body = const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+    if (_error != null) {
+      body = Center(
+        child: Text(_error!),
       );
     }
     return Scaffold(
